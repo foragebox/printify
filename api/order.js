@@ -4,12 +4,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    console.log("Incoming order:", req.body);
+    console.log("===== NEW ORDER =====");
+    console.log(JSON.stringify(req.body, null, 2));
 
-    return res.status(200).json({ success: true });
+    return res.status(200).json({ received: true });
 
   } catch (error) {
-    console.error(error);
+    console.error("ERROR:", error);
     return res.status(500).json({ error: "Server error" });
   }
 }
