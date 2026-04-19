@@ -1,48 +1,3 @@
-const line_items = await Promise.all(order.purchasedItems.map(async (item) => {
-
-  if (!item.variantSKU) {
-    throw new Error(`Missing SKU for variantId: ${item.variantId}`);
-  }
-
-  // Fetch Printify variants (you can cache this later)
-  const response = await fetch(
-    "https://api.printify.com/v1/shops/YOUR_SHOP_ID/products.json",
-    {
-      headers: {
-        "Authorization": `Bearer ${process.env.PRINTIFY_API_KEY}`
-      }
-    }
-  );
-
-  const products = await response.json();
-
-  // Find matching variant by SKU
-  let match = null;
-
-  for (const product of products.data) {
-    for (const variant of product.variants) {
-      if (variant.sku === item.variantSKU) {
-        match = {
-          product_id: product.id,
-          variant_id: variant.id
-        };
-        break;
-      }
-    }
-    if (match) break;
-  }
-
-  if (!match) {
-    throw new Error(`No Printify match for SKU: ${item.variantSKU}`);
-  }
-
-  return {
-    product_id: match.product_id,
-    variant_id: match.variant_id,
-    quantity: item.count
-  };
-}));
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -60,21 +15,52 @@ export default async function handler(req, res) {
     const firstName = nameParts[0] || "Customer";
     const lastName = nameParts.slice(1).join(" ") || "";
 
-    // Map items
-    const line_items = order.purchasedItems.map(item => {
-      const mapped = PRODUCT_MAP[item.productId];
+    // 🔴 Fetch all Printify products (we’ll optimise later)
+    const printifyProductsRes = await fetch(
+      `https://api.printify.com/v1/shops/${process.env.PRINTIFY_SHOP_ID}/products.json`,
+      {
+        headers: {
+          "Authorization": `Bearer ${process.env.PRINTIFY_API_KEY}`
+        }
+      }
+    );
 
-      if (!mapped) {
-        throw new Error(`No mapping for productId: ${item.productId}`);
+    const printifyProducts = await printifyProductsRes.json();
+
+    // Map items using SKU
+    const line_items = order.purchasedItems.map(item => {
+
+      if (!item.variantSKU) {
+        throw new Error(`Missing SKU for variantId: ${item.variantId}`);
+      }
+
+      let match = null;
+
+      for (const product of printifyProducts.data) {
+        for (const variant of product.variants) {
+          if (variant.sku === item.variantSKU) {
+            match = {
+              product_id: product.id,
+              variant_id: variant.id
+            };
+            break;
+          }
+        }
+        if (match) break;
+      }
+
+      if (!match) {
+        throw new Error(`No Printify match for SKU: ${item.variantSKU}`);
       }
 
       return {
-        product_id: mapped.product_id,
-        variant_id: mapped.variant_id,
+        product_id: match.product_id,
+        variant_id: match.variant_id,
         quantity: item.count
       };
     });
 
+    // Build order for Printify
     const printifyOrder = {
       line_items,
       shipping_method: 1,
@@ -92,8 +78,10 @@ export default async function handler(req, res) {
       }
     };
 
+    console.log("Sending to Printify:", JSON.stringify(printifyOrder, null, 2));
+
     const response = await fetch(
-      "https://api.printify.com/v1/shops/YOUR_SHOP_ID/orders.json",
+      `https://api.printify.com/v1/shops/${process.env.PRINTIFY_SHOP_ID}/orders.json`,
       {
         method: "POST",
         headers: {
@@ -112,7 +100,7 @@ export default async function handler(req, res) {
       throw new Error(JSON.stringify(data));
     }
 
-    return res.status(200).json({ success: true, data });
+    return res.status(200).json({ success: true });
 
   } catch (error) {
     console.error("ERROR:", error.message);
